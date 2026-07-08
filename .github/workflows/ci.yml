@@ -27,7 +27,8 @@ jobs:
           docker run -d \
             --name key-escrow \
             -p 7070:7070 \
-            key-escrow-task
+            key-escrow-task \
+            java -jar target/key-escrow-service.jar
           echo "Container started, waiting for service to be ready..."
 
       # ── 4. Wait until the service is healthy ───────────────────────────────
