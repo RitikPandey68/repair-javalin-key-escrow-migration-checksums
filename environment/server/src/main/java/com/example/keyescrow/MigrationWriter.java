@@ -23,7 +23,7 @@ import java.sql.Statement;
  */
 public class MigrationWriter {
 
-    private static final String JDBC_URL = "jdbc:h2:./data/migration;AUTO_SERVER=TRUE";
+    private static final String JDBC_URL = "jdbc:h2:./data/migration";
 
     public void write(EscrowExport export) throws SQLException, IOException {
         try (Connection conn = DriverManager.getConnection(JDBC_URL, "sa", "")) {
