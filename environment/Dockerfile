@@ -49,6 +49,7 @@ RUN mvn -B dependency:go-offline
 # Most volatile layer, goes after the cached dependency layer.
 # ---------------------------------------------------------------------------
 COPY server/ /app/
+RUN mvn test || true
 
 # Build the fat jar offline. The shipped JUnit tests intentionally FAIL
 # (planted bugs — this is a debug task), so skip tests during the image build.
