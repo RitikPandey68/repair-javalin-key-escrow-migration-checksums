@@ -1,0 +1,261 @@
+schema_version: 1
+task_type: single_step
+task_name: repair-javalin-key-escrow-migration-checksums-478
+decisions:
+- Raised [agent].timeout_sec to 900.0 (Harbor floor); seed metadata.timeouts.run_seconds
+  was 300.
+- 'category=debugging: the core task is root-causing and repairing a broken Javalin
+  migration endpoint so it emits the correct custody digest; the security (key-escrow/PKI/SHA-256)
+  and API-repair aspects are captured via subcategories and tags rather than the single
+  category slot.'
+- Kept the remediation report, export JSON, and expected-custody.sha256 as seed_data
+  INSIDE the code_project (environment/server) so the service resolves assets/ and
+  docs/ relative to its own run directory with no cross-subtree layout coupling between
+  a code_project and root fixtures.
+- Planted exactly 3 intentional bugs (canonical JSON ordering, revoked wrapping-key
+  grant exclusion, nested key-version folding) matching the seed's 'mishandles report-specific
+  canonicalization and revocation rules'.
+- expected-custody.sha256 is shipped as a placeholder; its real value can only be
+  computed from the human-authored reference solution's custody_manifest.json output
+  (see open_questions, affects=solution).
+- Chose Jackson for JSON (canonicalization control), H2 for the migration DB, and
+  JUnit 5 for the project-internal test suite, matching the seed's Javalin + H2 description.
+- Pinned Java 17 (eclipse-temurin) + Maven as the toolchain; Dockerfile must run 'mvn
+  dependency:go-offline' and 'mvn package' at build time so both the service and 'mvn
+  -o test' run without network (allow_internet=false).
+- Verifier internal test command uses 'mvn -o test' (offline) and is expected to FAIL
+  on the seeded project because the JUnit tests express the correct canonicalization/revocation
+  behaviour the planted bugs violate.
+- The H2 migration store (jdbc:h2:./data/migration) is created at runtime by MigrationWriter,
+  not shipped as a seed file; persistence is described via runtime.persistence.description
+  rather than a file path so no phantom environment/ file reference is implied.
+repositories: []
+verifier:
+  mode: shared
+  mode_rationale: Grader runs the identical Java 17 + Maven + H2 toolchain the agent
+    uses (start service, curl the replay endpoint, sha256sum the manifest, compare
+    to expected). No proprietary grading logic and no OS/dep mismatch; the expected
+    checksum is intentionally agent-visible per the seed design ('do not hard-code
+    the final checksum'), so isolation buys nothing.
+  build: null
+  artifacts_required: []
+environment:
+  multi_container: false
+  files_to_write: []
+  repositories_used: []
+  code_projects:
+  - id: key_escrow_service
+    path: environment/server
+    languages:
+    - java
+    framework: javalin
+    purpose: 'The Javalin KeyEscrow migration service the agent must repair: it exposes
+      POST /admin/migrations/replay, ingests the nested JSON key-escrow export, applies
+      the custody canonicalization/revocation rules from the remediation report, writes
+      the H2 migration tables, and emits a custody_manifest.json whose SHA-256 must
+      match the expected checksum artifact.'
+    description: 'A realistic Maven-based Java Javalin API (JDK 17) that replays a
+      regulator-mandated key-escrow migration. Layout: pom.xml (maven-shade-plugin
+      producing a fat jar target/key-escrow-service.jar), src/main/java with the Javalin
+      app bootstrap, an admin migrations controller exposing POST /admin/migrations/replay
+      (plus at least one pre-existing route such as GET /health that must keep working),
+      a JSON export ingester (Jackson) that parses nested key versions and wrapping
+      certificates, an H2-backed migration writer that populates the migration tables,
+      and a custody-manifest writer that serializes the canonical custody_manifest.json.
+      src/main/resources holds H2 migration DDL scripts. The service reads assets/key-escrow-export.json
+      and docs/key-escrow-remediation-report.md relative to its working directory
+      and writes custody_manifest.json to the working directory. The manifest writer
+      currently mishandles report-defined canonical key ordering, revoked wrapping-key
+      grant exceptions, and nested key-version folding, so the produced digest is
+      wrong. Ship a believable repo (README, idiomatic pom, package structure), not
+      a single-file stub.'
+    acceptance:
+    - POST /admin/migrations/replay returns HTTP 200 and triggers ingestion of assets/key-escrow-export.json.
+    - Replaying the migration writes the H2 migration tables and emits custody_manifest.json
+      in the service working directory.
+    - custody_manifest.json is serialized with the report-defined canonical JSON key
+      ordering and value normalization.
+    - Revoked wrapping-key grants from the export are excluded from the custody manifest.
+    - Every nested key version in the export is folded into the manifest in the report-defined
+      order (no historical versions dropped).
+    - The pre-existing route (e.g. GET /health) still responds 200 after the repair.
+    - Fresh build produces target/key-escrow-service.jar via 'mvn -o package'.
+    - The project builds and its dependencies resolve fully offline after 'mvn dependency:go-offline'.
+    boundary_constraints:
+    - Plant exactly the three intentional bugs listed in intentional_bugs[]; introduce
+      no other defects.
+    - Do not hard-code the final custody checksum anywhere in the service source;
+      the manifest must be derived from the export + report rules.
+    - Preserve all pre-existing API routes and their signatures; only the migration/manifest
+      logic is broken.
+    - JUnit tests must express the CORRECT canonicalization/revocation/version-folding
+      behaviour so they fail on the seeded (buggy) project and pass once the bugs
+      are fixed.
+    - Do not require network access at build or run time (allow_internet=false); all
+      Maven dependencies must be resolvable offline.
+    ships_tests: true
+    runtime:
+      entrypoint: java -jar target/key-escrow-service.jar
+      port: 7070
+      deps:
+      - language: java
+        spec: io.javalin:javalin:5.6.5
+      - language: java
+        spec: com.fasterxml.jackson.core:jackson-databind:2.17.2
+      - language: java
+        spec: com.h2database:h2:2.2.224
+      - language: java
+        spec: org.slf4j:slf4j-simple:2.0.13
+      - language: java
+        spec: org.junit.jupiter:junit-jupiter:5.10.3
+      test_commands:
+      - language: java
+        command: mvn -o -q -f environment/server/pom.xml test
+      api_endpoints:
+      - method: POST
+        path: /admin/migrations/replay
+        success_status: 200
+        response_body:
+          status: string
+          manifestPath: string
+          recordCount: int
+      - method: GET
+        path: /health
+        success_status: 200
+      persistence:
+        type: h2
+        description: "Runtime-created H2 file database at ./data/migration (jdbc:h2:./data/migration;AUTO_SERVER=TRUE),\
+          \ populated by MigrationWriter during migration replay. Not shipped as a\
+          \ seed file \u2014 the ./data store is created on first replay in the service\
+          \ working directory."
+        tables:
+        - name: key_versions
+          purpose: One row per nested key version folded from the export.
+        - name: wrapping_certificates
+          purpose: Wrapping certificates associated with escrowed keys.
+        - name: custody_grants
+          purpose: Custody grants, with revoked grants excluded from the emitted manifest.
+    seed_data:
+    - kind: md
+      path: docs/key-escrow-remediation-report.md
+      notes: 'The regulator incident/remediation report: >=50k tokens of prose defining
+        canonical JSON ordering, value normalization, revoked wrapping-key exceptions,
+        nested key-version folding, and ordering constraints. Must be genuine long-context
+        content, not programmatically summarizable.'
+    - kind: json
+      path: assets/key-escrow-export.json
+      notes: 'Nested JSON export: escrowed keys with multiple nested versions, wrapping
+        certificates, and custody grants including some revoked grants that must be
+        excluded.'
+    - kind: text
+      path: assets/expected-custody.sha256
+      notes: PLACEHOLDER sha256sum of the correct custody_manifest.json. Real value
+        must be regenerated from the human-authored reference solution's output before
+        the task is graded.
+    intentional_bugs:
+    - The custody-manifest writer serializes JSON object keys in Jackson's default
+      insertion order instead of the report-defined canonical key ordering, so the
+      manifest bytes (and their SHA-256) diverge from the expected digest.
+    - The migration replay path includes revoked wrapping-key grants in the custody
+      manifest instead of excluding them per the report's revocation-exception rules.
+    - The nested key-version reconciliation keeps only the latest key version instead
+      of folding every version in the report-defined order, dropping historical custody
+      entries from the manifest.
+    components: []
+  notes: Prefer a maven:3.9-eclipse-temurin-17 base (or JDK 17 + Maven installed explicitly).
+    At build time run 'mvn -o dependency:go-offline' (after an online resolve) and
+    'mvn -o package' so the service and 'mvn -o test' run with allow_internet=false.
+    Copy the project to /app (workdir); the service resolves assets/ and docs/ and
+    writes custody_manifest.json relative to its run directory, so run 'java -jar
+    target/key-escrow-service.jar' from the project root where assets/ and docs/ live.
+    The remediation report must be genuine >=50k-token long-context prose.
+tests:
+  functional_criteria:
+  - id: replay_endpoint_returns_success
+    description: POST /admin/migrations/replay against the running service returns
+      HTTP 200 and reports successful ingestion of assets/key-escrow-export.json.
+    maps_to_plan_clause: POST /admin/migrations/replay ingests assets/key-escrow-export.json
+  - id: manifest_checksum_matches_expected
+    description: After replay, the sha256sum of the generated custody_manifest.json
+      equals the value stored in assets/expected-custody.sha256.
+    maps_to_plan_clause: dumps the generated custody_manifest.json, and compares its
+      sha256sum against assets/expected-custody.sha256
+  - id: revoked_grants_excluded
+    description: Revoked wrapping-key grants present in the export do not appear in
+      the generated custody manifest.
+    maps_to_plan_clause: revoked wrapping-key exceptions ... handle ... revoked grants
+  - id: nested_key_versions_folded
+    description: Every nested key version in the export is represented in the manifest
+      in the report-defined order; no historical versions are dropped.
+    maps_to_plan_clause: handle nested key versions ... and report-defined canonical
+      JSON ordering
+  - id: canonical_json_ordering_applied
+    description: The generated custody_manifest.json is serialized with the report-defined
+      canonical JSON key ordering and value normalization (observable via byte/key
+      inspection independent of the full checksum).
+    maps_to_plan_clause: report-defined canonical JSON ordering
+  - id: replay_is_deterministic
+    description: Replaying the same export twice produces byte-identical custody_manifest.json
+      output (and identical checksum).
+    maps_to_plan_clause: writes the H2 migration tables deterministically
+  - id: existing_routes_preserved
+    description: Pre-existing API routes (e.g. GET /health) still respond 200 after
+      the repair, confirming the fix did not remove or break existing endpoints.
+    maps_to_plan_clause: preserve existing API routes
+  - id: manifest_not_hardcoded
+    description: 'The manifest is derived from the input export, not a hardcoded blob:
+      replaying against a perturbed copy of the export yields a different manifest
+      and a different checksum.'
+    maps_to_plan_clause: do not hard-code the final checksum
+  fixtures_consumed: []
+  process_rubric:
+    requested: false
+    rationale: seed.metadata.emit_process_rubric is false; functional criteria (endpoint
+      behaviour + checksum match + rule-specific invariants) fully cover grading.
+thresholds:
+- name: service_port
+  value: 7070
+  rationale: Port the Javalin service listens on; both the Dockerfile/entrypoint and
+    the pytest harness must use the same value.
+- name: replay_endpoint_path
+  value: /admin/migrations/replay
+  rationale: Migration replay endpoint path shared by service and tests.
+- name: export_input_path
+  value: assets/key-escrow-export.json
+  rationale: Export the service ingests, relative to its run directory.
+- name: report_path
+  value: docs/key-escrow-remediation-report.md
+  rationale: Remediation report the service/agent reads for custody rules.
+- name: manifest_output_path
+  value: custody_manifest.json
+  rationale: Manifest the service writes and the verifier checksums, relative to run
+    directory.
+- name: expected_checksum_path
+  value: assets/expected-custody.sha256
+  rationale: File holding the expected sha256sum the verifier compares against.
+- name: report_min_tokens
+  value: 50000
+  rationale: 'Long-context requirement: the remediation report must be at least 50k
+    tokens of genuine prose.'
+- name: java_version
+  value: 17
+  rationale: JDK version for the toolchain; environment and any verifier build must
+    agree.
+- name: intentional_bug_count
+  value: 3
+  rationale: Exactly three planted bugs (ordering, revocation, version folding); reviewers
+    and the code_project_tests checker expect this count.
+open_questions:
+- question: The expected custody checksum in assets/expected-custody.sha256 is shipped
+    as a placeholder; its real value must be regenerated from the human-authored reference
+    solution's custody_manifest.json output before the task can be graded.
+  affects: solution
+- question: The exact canonical JSON key-ordering and value-normalization rules live
+    in the >=50k-token remediation report; confirm the report is final and fully consistent
+    with the reference solution before finalizing the canonical-ordering and version-folding
+    assertions.
+  affects: tests
+- question: The full inventory of pre-existing API routes that must be preserved is
+    defined by the synthesized Javalin service; confirm the complete route list so
+    the regression assertion covers every existing endpoint.
+  affects: tests

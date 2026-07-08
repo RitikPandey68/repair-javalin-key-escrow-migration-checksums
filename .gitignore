@@ -1,0 +1,18 @@
+# Maven build output
+environment/server/target/
+
+# Docker build cache / local artifacts
+*.class
+
+# IDE files
+.idea/
+*.iml
+*.iws
+.vscode/
+
+# Harbor job output
+jobs/
+
+# OS
+.DS_Store
+Thumbs.db

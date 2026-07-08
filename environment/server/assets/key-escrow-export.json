@@ -1,0 +1,114 @@
+{
+  "exportId": "KE-EXPORT-2024-0417",
+  "jurisdiction": "EU-ESMA",
+  "escrowedKeys": [
+    {
+      "keyId": "KMS-ROOT-Zeta",
+      "versions": [
+        {
+          "version": 3,
+          "algorithm": "aes-256-gcm",
+          "custodyStatus": "active",
+          "createdEpoch": 1710460800
+        },
+        {
+          "version": 1,
+          "algorithm": "aes-128-gcm",
+          "custodyStatus": "retired",
+          "createdEpoch": 1678924800
+        },
+        {
+          "version": 2,
+          "algorithm": "aes-256-cbc",
+          "custodyStatus": "retired",
+          "createdEpoch": 1694649600
+        }
+      ]
+    },
+    {
+      "keyId": "KMS-ROOT-Alpha",
+      "versions": [
+        {
+          "version": 2,
+          "algorithm": "rsa-3072",
+          "custodyStatus": "active",
+          "createdEpoch": 1700784000
+        },
+        {
+          "version": 1,
+          "algorithm": "rsa-2048",
+          "custodyStatus": "retired",
+          "createdEpoch": 1669852800
+        }
+      ]
+    },
+    {
+      "keyId": "KMS-ROOT-Mu",
+      "versions": [
+        {
+          "version": 1,
+          "algorithm": "ecdsa-p256",
+          "custodyStatus": "active",
+          "createdEpoch": 1704067200
+        }
+      ]
+    }
+  ],
+  "wrappingCertificates": [
+    {
+      "certId": "WC-004",
+      "subject": "CN=Escrow Wrapping   Authority,  O=Custodian Bank,C=DE",
+      "keyId": "KMS-ROOT-Zeta",
+      "notAfterEpoch": 1767225600
+    },
+    {
+      "certId": "WC-001",
+      "subject": "CN=Escrow Wrapping Authority, O=Custodian Bank, C=DE",
+      "keyId": "KMS-ROOT-Alpha",
+      "notAfterEpoch": 1751328000
+    },
+    {
+      "certId": "WC-002",
+      "subject": "CN=Regional  Wrapping CA,O=Custodian Bank,C=DE",
+      "keyId": "KMS-ROOT-Mu",
+      "notAfterEpoch": 1759276800
+    }
+  ],
+  "custodyGrants": [
+    {
+      "grantId": "CG-0007",
+      "principal": "  ops.custodian@custodian-bank.example  ",
+      "certId": "WC-004",
+      "revoked": false,
+      "grantedEpoch": 1710547200
+    },
+    {
+      "grantId": "CG-0002",
+      "principal": "regulator.observer@esma.europa.example",
+      "certId": "WC-001",
+      "revoked": true,
+      "grantedEpoch": 1701216000
+    },
+    {
+      "grantId": "CG-0001",
+      "principal": "primary.custodian@custodian-bank.example",
+      "certId": "WC-001",
+      "revoked": false,
+      "grantedEpoch": 1669939200
+    },
+    {
+      "grantId": "CG-0005",
+      "principal": "backup.custodian@custodian-bank.example",
+      "certId": "WC-002",
+      "revoked": true,
+      "grantedEpoch": 1704153600
+    },
+    {
+      "grantId": "CG-0003",
+      "principal": "secondary.custodian@custodian-bank.example",
+      "certId": "WC-002",
+      "revoked": false,
+      "grantedEpoch": 1704240000
+    }
+  ]
+}
