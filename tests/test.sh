@@ -38,7 +38,7 @@ for _ in $(seq 1 60); do
     sleep 1
 done
 
-python -m pytest --ctrf /logs/verifier/ctrf.json /tests/test_outputs.py -rA
+python3 -m pytest --ctrf /logs/verifier/ctrf.json /tests/test_outputs.py -rA
 code=$?
 
 echo "pytest exit code: ${code}"
