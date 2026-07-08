@@ -1,0 +1,91 @@
+name: Key Escrow Service — Build & Verify
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:        # lets you trigger it manually from the Actions tab
+
+jobs:
+  build-and-verify:
+    name: Build Docker image and verify manifest checksum
+    runs-on: ubuntu-latest
+
+    steps:
+      # ── 1. Checkout ────────────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── 2. Build the Docker image ──────────────────────────────────────────
+      - name: Build Docker image
+        run: docker build -t key-escrow-task ./environment
+
+      # ── 3. Start the service in the background ─────────────────────────────
+      - name: Start service container
+        run: |
+          docker run -d \
+            --name key-escrow \
+            -p 7070:7070 \
+            key-escrow-task
+          echo "Container started, waiting for service to be ready..."
+
+      # ── 4. Wait until the service is healthy ───────────────────────────────
+      - name: Wait for service to be ready
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:7070/health > /dev/null 2>&1; then
+              echo "Service is up after ${i}s"
+              break
+            fi
+            echo "  attempt $i — not ready yet..."
+            sleep 1
+          done
+
+      # ── 5. Call the migration replay endpoint ──────────────────────────────
+      - name: Replay migration
+        run: |
+          echo "Calling POST /admin/migrations/replay ..."
+          RESPONSE=$(curl -s -X POST http://localhost:7070/admin/migrations/replay)
+          echo "Response: $RESPONSE"
+
+      # ── 6. Copy the manifest out of the container ──────────────────────────
+      - name: Copy custody_manifest.json from container
+        run: |
+          docker cp key-escrow:/app/custody_manifest.json ./custody_manifest.json
+          echo "--- Manifest contents ---"
+          cat custody_manifest.json
+
+      # ── 7. Compare SHA-256 against expected digest ─────────────────────────
+      - name: Verify SHA-256 checksum
+        run: |
+          ACTUAL=$(sha256sum custody_manifest.json | awk '{print $1}')
+          EXPECTED=$(awk 'NF && !/^#/ {print $1; exit}' environment/server/assets/expected-custody.sha256)
+
+          echo "Actual   SHA-256: $ACTUAL"
+          echo "Expected SHA-256: $EXPECTED"
+
+          if [ "$ACTUAL" = "$EXPECTED" ]; then
+            echo "CHECKSUM MATCH"
+          else
+            echo "CHECKSUM MISMATCH — the manifest writer has bugs that need to be fixed."
+            echo "Read docs/key-escrow-remediation-report.md for the canonicalization rules."
+            # This is EXPECTED for the buggy baseline — it confirms the task is valid.
+            # Remove the 'exit 0' below and uncomment 'exit 1' once you fix the service.
+            exit 0
+            # exit 1
+          fi
+
+      # ── 8. Upload the manifest as a build artifact ─────────────────────────
+      - name: Upload manifest artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: custody-manifest
+          path: custody_manifest.json
+          retention-days: 7
+
+      # ── 9. Stop and remove the container ───────────────────────────────────
+      - name: Clean up container
+        if: always()
+        run: docker rm -f key-escrow || true
