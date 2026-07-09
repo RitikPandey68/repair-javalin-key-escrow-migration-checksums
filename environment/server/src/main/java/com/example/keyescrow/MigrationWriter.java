@@ -107,11 +107,22 @@ public class MigrationWriter {
     }
 
     private String readResource(String name) throws IOException {
-        try (InputStream in = MigrationWriter.class.getResourceAsStream(name)) {
-            if (in == null) {
-                throw new IOException("Bundled resource missing: " + name);
+        String cleanPath = name.startsWith("/") ? name.substring(1) : name;
+        InputStream in = Thread.currentThread().getContextClassLoader().getResourceAsStream(cleanPath);
+        if (in == null) {
+            ClassLoader classLoader = MigrationWriter.class.getClassLoader();
+            if (classLoader != null) {
+                in = classLoader.getResourceAsStream(cleanPath);
             }
-            return new String(in.readAllBytes(), StandardCharsets.UTF_8);
+        }
+        if (in == null) {
+            in = MigrationWriter.class.getResourceAsStream(name);
+        }
+        if (in == null) {
+            throw new IOException("Bundled resource missing: " + name);
+        }
+        try (InputStream stream = in) {
+            return new String(stream.readAllBytes(), StandardCharsets.UTF_8);
         }
     }
 }
