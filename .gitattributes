@@ -1,0 +1,6 @@
+# Force LF line endings for shell scripts and Dockerfile to prevent execution errors on Linux
+*.sh text eol=lf
+Dockerfile text eol=lf
+.dockerignore text eol=lf
+task.toml text eol=lf
+instruction.md text eol=lf
