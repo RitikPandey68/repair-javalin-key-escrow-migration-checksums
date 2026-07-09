@@ -1,6 +1,6 @@
 # Base: official Maven + Eclipse Temurin JDK 17 (Debian bookworm). Digest pinned
 # per the orchestrator's spec — do NOT float the tag.
-FROM maven:3.9-eclipse-temurin-17@sha256:1ed5d1f54416b706707b4f3238f63a20bb06aab27c6d240090a2bb9ad895ed45
+FROM public.ecr.aws/docker/library/maven:3.9.9-eclipse-temurin-21@sha256:3a4ab3276a087bf276f79cae96b1af04f53731bec53fb2e651aca79e4b10211e
 
 # ---------------------------------------------------------------------------
 # System packages: agent runtime recording tooling (tmux, asciinema) + curl,
