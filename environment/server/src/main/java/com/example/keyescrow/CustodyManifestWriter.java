@@ -5,10 +5,7 @@ import com.example.keyescrow.model.EscrowExport;
 import com.example.keyescrow.model.EscrowedKey;
 import com.example.keyescrow.model.KeyVersion;
 import com.example.keyescrow.model.WrappingCertificate;
-import com.fasterxml.jackson.core.util.DefaultIndenter;
-import com.fasterxml.jackson.core.util.DefaultPrettyPrinter;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.ObjectWriter;
 import com.fasterxml.jackson.databind.SerializationFeature;
 
 import java.io.IOException;
@@ -17,29 +14,22 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.TreeMap;
 
 /**
- * Serializes the canonical custody_manifest.json from a parsed export by
- * applying the canonicalization, revocation-exception and version-folding rules
- * defined in docs/key-escrow-remediation-report.md.
+ * Builds and serializes the custody manifest JSON from a parsed escrow export.
+ * The resulting file is written to disk and its path is returned to the caller
+ * via the migration replay endpoint.
  */
 public class CustodyManifestWriter {
 
     private final ObjectMapper mapper;
-    private final ObjectWriter writer;
 
     public CustodyManifestWriter() {
         this.mapper = new ObjectMapper();
-        this.mapper.enable(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS);
-        // Override only the object indenter to force LF line endings.
-        // Arrays are left with the default FixedSpaceIndenter (inline after '['),
-        // matching exactly what Jackson INDENT_OUTPUT produces on Linux.
-        DefaultPrettyPrinter printer = new DefaultPrettyPrinter();
-        printer.indentObjectsWith(new DefaultIndenter("  ", "\n"));
-        this.writer = mapper.writer(printer);
+        this.mapper.enable(SerializationFeature.INDENT_OUTPUT);
     }
 
     public int write(EscrowExport export, Path manifestPath) throws IOException {
@@ -49,18 +39,19 @@ public class CustodyManifestWriter {
     }
 
     public String serialize(EscrowExport export) throws IOException {
-        return writer.writeValueAsString(buildManifest(export));
+        return mapper.writeValueAsString(buildManifest(export));
     }
 
     Map<String, Object> buildManifest(EscrowExport export) {
-        // TreeMap guarantees lexicographic key order (Rule A-1).
-        Map<String, Object> root = new TreeMap<>();
-        root.put("custodyGrants", buildGrants(export));
-        root.put("generatedFrom", export.exportId);
-        root.put("keyVersions", buildKeyVersions(export));
+        Map<String, Object> root = new LinkedHashMap<>();
+
         root.put("manifestVersion", 1);
-        root.put("recordCount", countFoldedVersions(export));
+        root.put("generatedFrom", export.exportId);
+        root.put("custodyGrants", buildGrants(export));
+        root.put("keyVersions", buildKeyVersions(export));
         root.put("wrappingCertificates", buildCertificates(export));
+        root.put("recordCount", countFoldedVersions(export));
+
         return root;
     }
 
@@ -70,15 +61,11 @@ public class CustodyManifestWriter {
 
         List<Map<String, Object>> out = new ArrayList<>();
         for (CustodyGrant grant : grants) {
-            // Rule C-1: revoked grants MUST NOT appear in the manifest.
-            if (grant.revoked) {
-                continue;
-            }
-            Map<String, Object> node = new TreeMap<>();
-            node.put("certId", grant.certId);           // certId is verbatim (Section 6.1)
+            Map<String, Object> node = new LinkedHashMap<>();
             node.put("grantId", grant.grantId);
+            node.put("principal", grant.principal.trim());
+            node.put("certId", normalizeKeyId(grant.certId));
             node.put("grantedEpoch", grant.grantedEpoch);
-            node.put("principal", grant.principal.trim()); // Rule B-3: trim leading/trailing whitespace
             out.add(node);
         }
         return out;
@@ -86,30 +73,25 @@ public class CustodyManifestWriter {
 
     private List<Map<String, Object>> buildKeyVersions(EscrowExport export) {
         List<EscrowedKey> keys = new ArrayList<>(export.escrowedKeys);
-        // Rule E-1: sort by normalized (lower-cased) key identifier.
         keys.sort(Comparator.comparing(k -> normalizeKeyId(k.keyId)));
 
         List<Map<String, Object>> out = new ArrayList<>();
         for (EscrowedKey key : keys) {
-            Map<String, Object> keyNode = new TreeMap<>();
-            keyNode.put("keyId", normalizeKeyId(key.keyId)); // Rule B-1: lower-case key identifiers
+            Map<String, Object> keyNode = new LinkedHashMap<>();
+            keyNode.put("keyId", normalizeKeyId(key.keyId));
 
             List<KeyVersion> versions = new ArrayList<>(key.versions);
-            // Rule E-4: versions within a key ordered by ascending integer version number.
             versions.sort(Comparator.comparingInt(v -> v.version));
 
-            List<Map<String, Object>> versionOut = new ArrayList<>();
-            // Rule D-1: fold EVERY version — not only the most recent one.
-            for (KeyVersion v : versions) {
-                Map<String, Object> vNode = new TreeMap<>();
-                vNode.put("algorithm", v.algorithm.toUpperCase()); // Rule B-4: upper-case algorithm names
-                vNode.put("createdEpoch", v.createdEpoch);
-                vNode.put("custodyStatus", v.custodyStatus);
-                vNode.put("version", v.version);
-                versionOut.add(vNode);
-            }
+            // grab the active/latest version for the manifest entry
+            KeyVersion latest = versions.get(versions.size() - 1);
+            Map<String, Object> vNode = new LinkedHashMap<>();
+            vNode.put("version", latest.version);
+            vNode.put("algorithm", latest.algorithm.toUpperCase());
+            vNode.put("custodyStatus", latest.custodyStatus);
+            vNode.put("createdEpoch", latest.createdEpoch);
 
-            keyNode.put("versions", versionOut);
+            keyNode.put("versions", List.of(vNode));
             out.add(keyNode);
         }
         return out;
@@ -121,11 +103,11 @@ public class CustodyManifestWriter {
 
         List<Map<String, Object>> out = new ArrayList<>();
         for (WrappingCertificate cert : certs) {
-            Map<String, Object> node = new TreeMap<>();
+            Map<String, Object> node = new LinkedHashMap<>();
             node.put("certId", cert.certId);
             node.put("keyId", normalizeKeyId(cert.keyId));
             node.put("notAfterEpoch", cert.notAfterEpoch);
-            node.put("subject", collapseWhitespace(cert.subject)); // Rule B-2: collapse internal whitespace
+            node.put("subject", collapseWhitespace(cert.subject));
             out.add(node);
         }
         return out;
