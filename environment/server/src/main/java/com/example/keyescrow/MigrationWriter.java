@@ -116,10 +116,35 @@ public class MigrationWriter {
             }
         }
         if (in == null) {
+            in = ClassLoader.getSystemResourceAsStream(cleanPath);
+        }
+        if (in == null) {
             in = MigrationWriter.class.getResourceAsStream(name);
         }
         if (in == null) {
-            throw new IOException("Bundled resource missing: " + name);
+            in = MigrationWriter.class.getResourceAsStream(cleanPath);
+        }
+        if (in == null) {
+            StringBuilder diag = new StringBuilder();
+            try {
+                java.security.ProtectionDomain pd = MigrationWriter.class.getProtectionDomain();
+                if (pd != null && pd.getCodeSource() != null && pd.getCodeSource().getLocation() != null) {
+                    java.net.URL url = pd.getCodeSource().getLocation();
+                    diag.append("Code source location: ").append(url).append("\n");
+                    if (url.toString().endsWith(".jar") || url.toString().startsWith("file:")) {
+                        try (java.util.zip.ZipInputStream zip = new java.util.zip.ZipInputStream(url.openStream())) {
+                            java.util.zip.ZipEntry entry;
+                            diag.append("Jar entries:\n");
+                            while ((entry = zip.getNextEntry()) != null) {
+                                diag.append("  ").append(entry.getName()).append("\n");
+                            }
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                diag.append("Failed to diagnose jar: ").append(e.getMessage()).append("\n");
+            }
+            throw new IOException("Bundled resource missing: " + name + "\nDiagnostic:\n" + diag.toString());
         }
         try (InputStream stream = in) {
             return new String(stream.readAllBytes(), StandardCharsets.UTF_8);
